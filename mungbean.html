@@ -1,0 +1,892 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mung Bean Farming Game</title>
+  <style>
+    :root {
+      --bg-dark: #050608;
+      --bg-panel: #10131a;
+      --accent: #00ff9c;
+      --accent-soft: #00b873;
+      --text-main: #e6f8ee;
+      --text-dim: #7aa894;
+      --danger: #ff4b6e;
+    }
+
+    body {
+      font-family: Arial, sans-serif;
+      text-align: center;
+      margin: 0;
+      padding: 20px;
+      background: radial-gradient(circle at top, #0b1f1a 0, #020308 55%, #000 100%);
+      color: var(--text-main);
+      position: relative;
+      overflow-x: hidden;
+    }
+
+    /* Fake scanlines */
+    body::before {
+      content: "";
+      pointer-events: none;
+      position: fixed;
+      inset: 0;
+      background-image: linear-gradient(
+        rgba(255, 255, 255, 0.02) 1px,
+        transparent 1px
+      );
+      background-size: 100% 3px;
+      mix-blend-mode: soft-light;
+      opacity: 0.35;
+      z-index: 0;
+    }
+
+    h1 {
+      text-shadow: 0 0 6px var(--accent);
+      margin-bottom: 10px;
+      position: relative;
+      z-index: 1;
+    }
+
+    h2 {
+      margin-top: 18px;
+      margin-bottom: 6px;
+      color: var(--accent);
+      font-size: 1.1rem;
+      text-shadow: 0 0 4px rgba(0,255,156,0.4);
+    }
+
+    p {
+      margin: 4px 0;
+      position: relative;
+      z-index: 1;
+    }
+
+    .stat-line span.label {
+      color: var(--text-dim);
+      font-size: 0.9rem;
+    }
+
+    .stat-line span.value {
+      font-weight: bold;
+    }
+
+    .panel {
+      background: rgba(5, 8, 12, 0.9);
+      border-radius: 10px;
+      border: 1px solid rgba(0, 255, 156, 0.3);
+      padding: 10px;
+      margin: 10px auto;
+      max-width: 900px;
+      box-shadow: 0 0 14px rgba(0, 255, 156, 0.1);
+      position: relative;
+      z-index: 1;
+    }
+
+    .flex-row {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 10px;
+    }
+
+    button {
+      margin: 4px;
+      padding: 8px 10px;
+      cursor: pointer;
+      background: #10131a;
+      color: var(--text-main);
+      border-radius: 6px;
+      border: 1px solid rgba(0, 255, 156, 0.5);
+      font-size: 0.85rem;
+      transition: background 0.15s, box-shadow 0.15s, transform 0.05s;
+    }
+
+    button:hover:not(:disabled) {
+      background: #142026;
+      box-shadow: 0 0 10px rgba(0, 255, 156, 0.5);
+      transform: translateY(-1px);
+    }
+
+    button:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+      box-shadow: none;
+    }
+
+    #field {
+      display: flex;
+      justify-content: center;
+      flex-wrap: wrap;
+      width: 320px;
+      margin: 10px auto;
+      border: 1px solid rgba(0, 255, 156, 0.4);
+      padding: 10px;
+      min-height: 100px;
+      border-radius: 8px;
+      background: radial-gradient(circle at top, #123324 0, #050608 70%);
+    }
+
+    .sprout {
+      width: 20px;
+      height: 20px;
+      background: var(--accent-soft);
+      border-radius: 50%;
+      margin: 4px;
+      cursor: pointer;
+      box-shadow: 0 0 6px rgba(0, 255, 156, 0.7);
+    }
+
+    #sproutOverflow {
+      width: 100%;
+      text-align: center;
+      font-size: 12px;
+      color: var(--text-dim);
+      margin-top: 4px;
+    }
+
+    #juice-container {
+      display: flex;
+      justify-content: center;
+      margin: 10px auto;
+      width: 60px;
+      height: 100px;
+      background: #262116;
+      border-radius: 10px 10px 6px 6px;
+      position: relative;
+      overflow: hidden;
+      border: 1px solid rgba(255, 187, 100, 0.8);
+      box-shadow: 0 0 10px rgba(255, 187, 100, 0.3);
+    }
+
+    #juice-level {
+      width: 100%;
+      height: 0%;
+      background: linear-gradient(to top, #ff9c2b, #ffd966);
+      position: absolute;
+      bottom: 0;
+      transition: height 0.3s;
+    }
+
+    #harvest-mode {
+      display: none;
+      width: 120px;
+      height: 120px;
+      background: #03522a;
+      position: relative;
+      margin: 10px auto;
+      border-radius: 8px;
+      border: 1px solid rgba(0, 255, 156, 0.5);
+      box-shadow: 0 0 10px rgba(0, 255, 156, 0.5);
+    }
+
+    #target {
+      width: 40px;
+      height: 40px;
+      background: #f8f8f8;
+      border-radius: 50%;
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      cursor: pointer;
+      box-shadow: 0 0 12px rgba(255,255,255,0.7);
+    }
+
+    #winScreen {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.9);
+      color: white;
+      font-size: 24px;
+      z-index: 999;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 20px;
+      flex-direction: column;
+    }
+
+    #winScreen p {
+      margin: 10px 0;
+    }
+
+    #winScreen button {
+      margin-top: 12px;
+    }
+
+    #log {
+      background: #050608;
+      border-radius: 8px;
+      border: 1px solid rgba(0, 255, 156, 0.4);
+      padding: 6px;
+      height: 140px;
+      overflow-y: auto;
+      font-size: 0.75rem;
+      text-align: left;
+      color: var(--text-dim);
+      line-height: 1.3;
+    }
+
+    .log-entry {
+      margin-bottom: 2px;
+    }
+
+    .log-entry span.time {
+      color: var(--accent-soft);
+      margin-right: 4px;
+    }
+
+    .prestige-info {
+      font-size: 0.85rem;
+      color: var(--text-dim);
+    }
+
+    .prestige-info span.value {
+      color: var(--accent);
+      font-weight: bold;
+    }
+
+    @media (max-width: 720px) {
+      .flex-row {
+        flex-direction: column;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <h1>Mung Bean Farming Game</h1>
+
+  <div class="panel">
+    <div class="stat-line">
+      <span class="label">Sprouts:</span>
+      <span class="value" id="sprouts">0</span>
+    </div>
+    <div id="field"></div>
+
+    <div class="stat-line">
+      <span class="label">Harvested Sprouts:</span>
+      <span class="value" id="harvested">0</span>
+    </div>
+
+    <div class="stat-line">
+      <span class="label">Juice:</span>
+      <span class="value" id="juice">0</span>
+    </div>
+    <div id="juice-container">
+      <div id="juice-level"></div>
+    </div>
+
+    <div class="stat-line">
+      <span class="label">Tokens:</span>
+      <span class="value" id="tokens">0</span>
+    </div>
+    <div class="stat-line">
+      <span class="label">Rare Mung Beans:</span>
+      <span class="value" id="rareBeans">0</span>
+    </div>
+
+    <div class="stat-line">
+      <span class="label">Time Played:</span>
+      <span class="value" id="timePlayed">0</span> <span class="label">seconds</span>
+    </div>
+
+    <div class="prestige-info">
+      Prestige Level: <span class="value" id="prestigeLevel">0</span> ·
+      Token Multiplier: <span class="value" id="prestigeMult">1.00×</span><br>
+      Best Time to Become One With the Mung: <span class="value" id="bestTime">–</span>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Core Actions</h2>
+    <div>
+      <button id="harvestSprout">Harvest Sprout</button>
+      <button id="juiceSprouts">Juice Sprouts</button>
+      <button id="sellJuice">Sell Juice</button>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Core Upgrades</h2>
+    <div class="flex-row">
+      <button id="buyHarvester" title="Deploy a basic automated harvester drone. Harvests sprouts every second.">
+        Harvester (200 Tokens)
+      </button>
+      <button id="buyJuicer" title="Install an automated juicer line. Converts harvested sprouts into juice every second.">
+        Juicer (200 Tokens)
+      </button>
+      <button id="buyLargerBeans" title="Gene-splice your mung stock. Each harvest pulls double the sprouts.">
+        Larger Beans (100 Tokens)
+      </button>
+      <button id="buyFertilizer" title="Taint the soil with experimental fertilizer. 5% chance per second to spawn a rare mung bean.">
+        Fertilizer (100 Tokens)
+      </button>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Cyberpunk Upgrades</h2>
+    <div class="flex-row">
+      <button id="buyNeonLamps" title="Illegal ultraviolet rigs flood the fields. Doubles sprout growth per tick.">
+        Neon Grow Lamps (300 Tokens)
+      </button>
+      <button id="buyDroneSwarm" title="Upgrade to a swarm of harvest drones. Harvester works twice per tick. (Requires Harvester)">
+        Drone Harvester Swarm (400 Tokens)
+      </button>
+      <button id="buyJuicerArray" title="Industrial juicer arrays spin nonstop. Juicer works twice per tick. (Requires Juicer)">
+        Industrial Juicer Array (400 Tokens)
+      </button>
+    </div>
+    <div class="flex-row">
+      <button id="buyCorpSyndicate" title="Sign away your soul to the Mung Syndicate. Juice sells for more tokens.">
+        Corporate Mung Syndicate (500 Tokens)
+      </button>
+      <button id="buyNeuroFert" title="Neural fertilizer grid pulses under the soil. Doubles rare bean spawn chance. (Requires Fertilizer)">
+        Neuro-Fertilizer Grid (300 Tokens)
+      </button>
+      <button id="buyMilkVat" title="A forbidden vat converts juice directly into rare beans and tokens. Consumes juice automatically.">
+        Mung Milk Vat (600 Tokens)
+      </button>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Minigame</h2>
+    <button id="toggleHarvestMode" title="Enter focused harvest mode. Click the glowing core to rip sprouts faster.">
+      Toggle Harvest Mode
+    </button>
+    <div id="harvest-mode">
+      <div id="target"></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Mung Log</h2>
+    <div id="log"></div>
+  </div>
+
+  <div id="winScreen">
+    <p>You have become one with the Mung!</p>
+    <p>Time spent this run: <span id="finalTime"></span> seconds.</p>
+    <p>Prestige Level: <span id="finalPrestige"></span></p>
+    <button id="prestigeButton">Ascend with Corrupted Mung (Prestige Reset)</button>
+  </div>
+
+  <script>
+    // --- Game State ---
+    let sprouts = 0;
+    let harvested = 0;
+    let juice = 0;
+    let tokens = 0;
+    let rareBeans = 0;
+
+    let hasHarvester = false;
+    let hasJuicer = false;
+    let hasLargerBeans = false;
+    let hasFertilizer = false;
+
+    // Cyberpunk upgrades
+    let hasNeonLamps = false;
+    let hasDroneSwarm = false;
+    let hasJuicerArray = false;
+    let hasCorpSyndicate = false;
+    let hasNeuroFert = false;
+    let hasMilkVat = false;
+
+    // Prestige
+    let prestigeLevel = 0;
+    let bestTime = null; // seconds
+
+    let timePlayed = 0;
+
+    // Interval handles
+    let growthInterval = null;
+    let timeInterval = null;
+    let harvesterInterval = null;
+    let juicerInterval = null;
+    let fertilizerInterval = null;
+    let milkVatInterval = null;
+
+    // Constants
+    const GROWTH_MS = 1125;
+    const HARVESTER_MS = 1000;
+    const JUICER_MS = 1000;
+    const FERTILIZER_MS = 1000;
+    const BASE_FERTILIZER_CHANCE = 0.05; // 5%/sec
+    const JUICE_PER_SPROUT = 5;
+    const MAX_VISIBLE_SPROUTS = 60;
+    const MILK_VAT_MS = 1000;
+    const PRESTIGE_TOKEN_STEP = 0.25; // each prestige adds +25% token multiplier
+    const PRESTIGE_FERT_STEP = 0.02; // each prestige adds +2% absolute rare chance, clamped
+
+    // Dynamic modifiers
+    let growthAmount = 1;                  // sprouts per growth tick
+    let autoHarvestExtra = 0;              // extra harvests per harvester tick
+    let autoJuiceExtra = 0;                // extra juicings per juicer tick
+    let tokenPerJuiceBase = 1;             // base: 1, corp syndicate doubles
+    let fertilizerChanceBase = BASE_FERTILIZER_CHANCE; // base chance before prestige
+
+    // --- DOM references ---
+    const sproutsSpan = document.getElementById('sprouts');
+    const harvestedSpan = document.getElementById('harvested');
+    const juiceSpan = document.getElementById('juice');
+    const tokensSpan = document.getElementById('tokens');
+    const rareBeansSpan = document.getElementById('rareBeans');
+    const timePlayedSpan = document.getElementById('timePlayed');
+    const prestigeLevelSpan = document.getElementById('prestigeLevel');
+    const prestigeMultSpan = document.getElementById('prestigeMult');
+    const bestTimeSpan = document.getElementById('bestTime');
+
+    const fieldDiv = document.getElementById('field');
+    const juiceLevelDiv = document.getElementById('juice-level');
+
+    const harvestButton = document.getElementById('harvestSprout');
+    const juiceButton = document.getElementById('juiceSprouts');
+    const sellButton = document.getElementById('sellJuice');
+
+    const buyHarvesterBtn = document.getElementById('buyHarvester');
+    const buyJuicerBtn = document.getElementById('buyJuicer');
+    const buyLargerBeansBtn = document.getElementById('buyLargerBeans');
+    const buyFertilizerBtn = document.getElementById('buyFertilizer');
+
+    const buyNeonLampsBtn = document.getElementById('buyNeonLamps');
+    const buyDroneSwarmBtn = document.getElementById('buyDroneSwarm');
+    const buyJuicerArrayBtn = document.getElementById('buyJuicerArray');
+    const buyCorpSyndicateBtn = document.getElementById('buyCorpSyndicate');
+    const buyNeuroFertBtn = document.getElementById('buyNeuroFert');
+    const buyMilkVatBtn = document.getElementById('buyMilkVat');
+
+    const toggleHarvestModeBtn = document.getElementById('toggleHarvestMode');
+    const harvestModeDiv = document.getElementById('harvest-mode');
+    const targetDiv = document.getElementById('target');
+
+    const logDiv = document.getElementById('log');
+
+    const winScreen = document.getElementById('winScreen');
+    const finalTimeSpan = document.getElementById('finalTime');
+    const finalPrestigeSpan = document.getElementById('finalPrestige');
+    const prestigeButton = document.getElementById('prestigeButton');
+
+    // --- Utility: Logging ---
+    function logMessage(text) {
+      const entry = document.createElement('div');
+      entry.className = 'log-entry';
+      const timeSpan = document.createElement('span');
+      timeSpan.className = 'time';
+      const now = new Date();
+      timeSpan.textContent = now.toLocaleTimeString();
+      const textSpan = document.createElement('span');
+      textSpan.textContent = ' ' + text;
+      entry.appendChild(timeSpan);
+      entry.appendChild(textSpan);
+      logDiv.prepend(entry);
+      // Optional: limit log length
+      const maxEntries = 80;
+      while (logDiv.children.length > maxEntries) {
+        logDiv.removeChild(logDiv.lastChild);
+      }
+    }
+
+    // --- Prestige helpers ---
+    function getTokenMultiplierFromPrestige() {
+      return 1 + prestigeLevel * PRESTIGE_TOKEN_STEP;
+    }
+
+    function getEffectiveTokenPerJuice() {
+      return tokenPerJuiceBase * getTokenMultiplierFromPrestige();
+    }
+
+    function getEffectiveFertilizerChance() {
+      // Base (5% or 10% with Neuro-Fert) + prestige bonus, capped at 70%
+      const base = fertilizerChanceBase;
+      const bonus = prestigeLevel * PRESTIGE_FERT_STEP;
+      return Math.min(0.7, base + bonus);
+    }
+
+    function updatePrestigeUI() {
+      prestigeLevelSpan.textContent = prestigeLevel;
+      prestigeMultSpan.textContent = getTokenMultiplierFromPrestige().toFixed(2) + '×';
+      bestTimeSpan.textContent = bestTime === null ? '–' : bestTime + 's';
+    }
+
+    // --- Core Loops ---
+    function startGameLoops() {
+      growthInterval = setInterval(() => {
+        sprouts += growthAmount;
+        updateSproutsUI();
+        updateUI();
+      }, GROWTH_MS);
+
+      timeInterval = setInterval(() => {
+        timePlayed++;
+        timePlayedSpan.textContent = timePlayed;
+      }, 1000);
+    }
+
+    function clearAllIntervals() {
+      if (growthInterval) clearInterval(growthInterval);
+      if (timeInterval) clearInterval(timeInterval);
+      if (harvesterInterval) clearInterval(harvesterInterval);
+      if (juicerInterval) clearInterval(juicerInterval);
+      if (fertilizerInterval) clearInterval(fertilizerInterval);
+      if (milkVatInterval) clearInterval(milkVatInterval);
+      growthInterval = timeInterval = harvesterInterval = juicerInterval = fertilizerInterval = milkVatInterval = null;
+    }
+
+    // --- UI Updates ---
+    function updateSproutsUI() {
+      fieldDiv.innerHTML = '';
+
+      const visible = Math.min(sprouts, MAX_VISIBLE_SPROUTS);
+      for (let i = 0; i < visible; i++) {
+        const sproutEl = document.createElement('div');
+        sproutEl.classList.add('sprout');
+        sproutEl.addEventListener('click', manualHarvest);
+        fieldDiv.appendChild(sproutEl);
+      }
+
+      if (sprouts > MAX_VISIBLE_SPROUTS) {
+        const overflow = document.createElement('div');
+        overflow.id = 'sproutOverflow';
+        overflow.textContent = `+${sprouts - MAX_VISIBLE_SPROUTS} more sprouts`;
+        fieldDiv.appendChild(overflow);
+      }
+    }
+
+    function updateJuiceUI() {
+      const percentage = Math.min(100, juice * 10); // 0–10 juice => 0–100%
+      juiceLevelDiv.style.height = percentage + '%';
+    }
+
+    function updateUI() {
+      sproutsSpan.textContent = sprouts;
+      harvestedSpan.textContent = harvested;
+      juiceSpan.textContent = juice;
+      tokensSpan.textContent = tokens;
+      rareBeansSpan.textContent = rareBeans;
+
+      // Core action buttons
+      harvestButton.disabled = sprouts === 0;
+      juiceButton.disabled = harvested === 0;
+      sellButton.disabled = juice === 0;
+
+      // Core upgrades
+      buyHarvesterBtn.disabled = hasHarvester || tokens < 200;
+      buyJuicerBtn.disabled = hasJuicer || tokens < 200;
+      buyLargerBeansBtn.disabled = hasLargerBeans || tokens < 100;
+      buyFertilizerBtn.disabled = hasFertilizer || tokens < 100;
+
+      // Cyberpunk upgrades
+      buyNeonLampsBtn.disabled = hasNeonLamps || tokens < 300;
+      buyDroneSwarmBtn.disabled = hasDroneSwarm || tokens < 400 || !hasHarvester;
+      buyJuicerArrayBtn.disabled = hasJuicerArray || tokens < 400 || !hasJuicer;
+      buyCorpSyndicateBtn.disabled = hasCorpSyndicate || tokens < 500;
+      buyNeuroFertBtn.disabled = hasNeuroFert || tokens < 300 || !hasFertilizer;
+      buyMilkVatBtn.disabled = hasMilkVat || tokens < 600;
+
+      updatePrestigeUI();
+    }
+
+    // --- Actions ---
+    function manualHarvest() {
+      if (sprouts <= 0) return;
+
+      const baseAmount = hasLargerBeans ? 2 : 1;
+      const actual = Math.min(baseAmount, sprouts);
+      sprouts -= actual;
+      harvested += actual;
+
+      updateSproutsUI();
+      updateUI();
+    }
+
+    function juiceSprouts() {
+      if (harvested <= 0) return;
+      harvested -= 1;
+      juice += JUICE_PER_SPROUT;
+      updateJuiceUI();
+      updateUI();
+    }
+
+    function sellJuice() {
+      if (juice <= 0) return;
+      const tokensGained = Math.floor(juice * getEffectiveTokenPerJuice());
+      tokens += tokensGained;
+      juice = 0;
+      updateJuiceUI();
+      updateUI();
+      logMessage(`Sold juice for ${tokensGained} tokens.`);
+    }
+
+    function buyHarvester() {
+      if (hasHarvester || tokens < 200) return;
+      tokens -= 200;
+      hasHarvester = true;
+
+      harvesterInterval = setInterval(() => {
+        const totalHarvests = 1 + autoHarvestExtra;
+        for (let i = 0; i < totalHarvests; i++) {
+          if (sprouts <= 0) break;
+          manualHarvest();
+        }
+      }, HARVESTER_MS);
+
+      logMessage('Deployed basic Harvester. The fields hum with cheap automation.');
+      updateUI();
+    }
+
+    function buyJuicer() {
+      if (hasJuicer || tokens < 200) return;
+      tokens -= 200;
+      hasJuicer = true;
+
+      juicerInterval = setInterval(() => {
+        const totalJuices = 1 + autoJuiceExtra;
+        for (let i = 0; i < totalJuices; i++) {
+          if (harvested <= 0) break;
+          juiceSprouts();
+        }
+      }, JUICER_MS);
+
+      logMessage('Installed Juicer line. The factory whispers in citrus tones.');
+      updateUI();
+    }
+
+    function buyLargerBeans() {
+      if (hasLargerBeans || tokens < 100) return;
+      tokens -= 100;
+      hasLargerBeans = true;
+      logMessage('Larger Beans unlocked. The mung genome cries out, then obeys.');
+      updateUI();
+    }
+
+    function buyFertilizer() {
+      if (hasFertilizer || tokens < 100) return;
+      tokens -= 100;
+      hasFertilizer = true;
+
+      fertilizerChanceBase = BASE_FERTILIZER_CHANCE; // ensure base
+      fertilizerInterval = setInterval(() => {
+        const chance = getEffectiveFertilizerChance();
+        if (Math.random() < chance) {
+          rareBeans++;
+          updateUI();
+          logMessage('A rare mung bean emerges from the glowing soil.');
+          checkWinCondition();
+        }
+      }, FERTILIZER_MS);
+
+      logMessage('Fertilizer deployed. The soil starts to shimmer unnaturally.');
+      updateUI();
+    }
+
+    // --- Cyberpunk Upgrades ---
+
+    function buyNeonLamps() {
+      if (hasNeonLamps || tokens < 300) return;
+      tokens -= 300;
+      hasNeonLamps = true;
+      growthAmount = 2; // double sprout growth per tick
+      logMessage('Neon Grow Lamps installed. Night and day collapse into a single UV blur.');
+      updateUI();
+    }
+
+    function buyDroneSwarm() {
+      if (hasDroneSwarm || tokens < 400 || !hasHarvester) return;
+      tokens -= 400;
+      hasDroneSwarm = true;
+      autoHarvestExtra = 1; // harvester now harvests twice per tick
+      logMessage('Drone Harvester Swarm launched. The sky fills with buzzing profit.');
+      updateUI();
+    }
+
+    function buyJuicerArray() {
+      if (hasJuicerArray || tokens < 400 || !hasJuicer) return;
+      tokens -= 400;
+      hasJuicerArray = true;
+      autoJuiceExtra = 1; // juicer now juices twice per tick
+      logMessage('Industrial Juicer Array online. The juice river never stops.');
+      updateUI();
+    }
+
+    function buyCorpSyndicate() {
+      if (hasCorpSyndicate || tokens < 500) return;
+      tokens -= 500;
+      hasCorpSyndicate = true;
+      tokenPerJuiceBase = 2; // 2 tokens per juice before prestige multiplier
+      logMessage('Signed with the Corporate Mung Syndicate. Every drop now pays in blood-money tokens.');
+      updateUI();
+    }
+
+    function buyNeuroFert() {
+      if (hasNeuroFert || tokens < 300 || !hasFertilizer) return;
+      tokens -= 300;
+      hasNeuroFert = true;
+      fertilizerChanceBase = BASE_FERTILIZER_CHANCE * 2; // 10% per second before prestige bonus
+      logMessage('Neuro-Fertilizer Grid activated. Rare mung thoughts pulse through the roots.');
+      updateUI();
+    }
+
+    function buyMilkVat() {
+      if (hasMilkVat || tokens < 600) return;
+      tokens -= 600;
+      hasMilkVat = true;
+
+      milkVatInterval = setInterval(() => {
+        if (juice >= 10) {
+          juice -= 10;
+          const tokensGained = Math.floor(10 * getEffectiveTokenPerJuice());
+          tokens += tokensGained;
+          rareBeans += 1;
+          updateJuiceUI();
+          updateUI();
+          logMessage(`Mung Milk Vat converted 10 juice into ${tokensGained} tokens and 1 rare mung bean.`);
+          checkWinCondition();
+        }
+      }, MILK_VAT_MS);
+
+      logMessage('Mung Milk Vat installed. The vats churn with bio-luminescent despair.');
+      updateUI();
+    }
+
+    // --- Win Condition & Prestige ---
+    function checkWinCondition() {
+      if (rareBeans >= 10) {
+        endGame();
+      }
+    }
+
+    function endGame() {
+      clearAllIntervals();
+
+      // Disable normal buttons (prestige button remains)
+      document.querySelectorAll('button').forEach(btn => {
+        if (btn !== prestigeButton) btn.disabled = true;
+      });
+
+      finalTimeSpan.textContent = timePlayed;
+      finalPrestigeSpan.textContent = prestigeLevel;
+      winScreen.style.display = 'flex';
+
+      // Track best time
+      if (bestTime === null || timePlayed < bestTime) {
+        bestTime = timePlayed;
+      }
+
+      logMessage('You have become one with the Mung. Time fractures into legumes.');
+      updatePrestigeUI();
+    }
+
+    function prestigeReset() {
+      // Increase prestige
+      prestigeLevel++;
+      logMessage(`Ascension complete. Corrupted Mung Resonance increased to level ${prestigeLevel}.`);
+
+      // Reset run state but keep prestige & bestTime
+      sprouts = 0;
+      harvested = 0;
+      juice = 0;
+      tokens = 0;
+      rareBeans = 0;
+      timePlayed = 0;
+
+      hasHarvester = false;
+      hasJuicer = false;
+      hasLargerBeans = false;
+      hasFertilizer = false;
+
+      hasNeonLamps = false;
+      hasDroneSwarm = false;
+      hasJuicerArray = false;
+      hasCorpSyndicate = false;
+      hasNeuroFert = false;
+      hasMilkVat = false;
+
+      growthAmount = 1;
+      autoHarvestExtra = 0;
+      autoJuiceExtra = 0;
+      tokenPerJuiceBase = 1;
+      fertilizerChanceBase = BASE_FERTILIZER_CHANCE;
+
+      // Close win screen
+      winScreen.style.display = 'none';
+
+      // Re-enable all buttons (UI will re-disable unaffordable upgrades)
+      document.querySelectorAll('button').forEach(btn => btn.disabled = false);
+
+      // Reset UI
+      updateSproutsUI();
+      updateJuiceUI();
+      updateUI();
+      timePlayedSpan.textContent = timePlayed;
+
+      // Restart loops
+      startGameLoops();
+    }
+
+    // --- Harvest Mode Minigame ---
+    function toggleHarvestMode() {
+      const isHidden = window.getComputedStyle(harvestModeDiv).display === 'none';
+      harvestModeDiv.style.display = isHidden ? 'block' : 'none';
+      if (isHidden) {
+        logMessage('Entered focused Harvest Mode. All you see is the glowing seed of profit.');
+      } else {
+        logMessage('Exited Harvest Mode. The neon horizon returns.');
+      }
+    }
+
+    function minigameHarvest() {
+      if (sprouts > 0) {
+        manualHarvest();
+        if (sprouts === 0) {
+          harvestModeDiv.style.display = 'none';
+          logMessage('Harvest Mode ended: fields stripped bare.');
+        }
+      } else {
+        harvestModeDiv.style.display = 'none';
+      }
+    }
+
+    // --- Event wiring ---
+    function wireEvents() {
+      harvestButton.addEventListener('click', manualHarvest);
+      juiceButton.addEventListener('click', juiceSprouts);
+      sellButton.addEventListener('click', sellJuice);
+
+      buyHarvesterBtn.addEventListener('click', buyHarvester);
+      buyJuicerBtn.addEventListener('click', buyJuicer);
+      buyLargerBeansBtn.addEventListener('click', buyLargerBeans);
+      buyFertilizerBtn.addEventListener('click', buyFertilizer);
+
+      buyNeonLampsBtn.addEventListener('click', buyNeonLamps);
+      buyDroneSwarmBtn.addEventListener('click', buyDroneSwarm);
+      buyJuicerArrayBtn.addEventListener('click', buyJuicerArray);
+      buyCorpSyndicateBtn.addEventListener('click', buyCorpSyndicate);
+      buyNeuroFertBtn.addEventListener('click', buyNeuroFert);
+      buyMilkVatBtn.addEventListener('click', buyMilkVat);
+
+      toggleHarvestModeBtn.addEventListener('click', toggleHarvestMode);
+      targetDiv.addEventListener('click', minigameHarvest);
+
+      prestigeButton.addEventListener('click', prestigeReset);
+    }
+
+    // --- Init ---
+    function init() {
+      wireEvents();
+      updateSproutsUI();
+      updateJuiceUI();
+      updateUI();
+      startGameLoops();
+      logMessage('You awaken in the Neon Fields of Mung. The harvest awaits.');
+    }
+
+    init();
+  </script>
+</body>
+</html>
