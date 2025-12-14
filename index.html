@@ -26,7 +26,6 @@
       overflow-x: hidden;
     }
 
-    /* Fake scanlines */
     body::before {
       content: "";
       pointer-events: none;
@@ -250,6 +249,20 @@
       font-weight: bold;
     }
 
+    /* Local + Global leaderboard styling */
+    #leaderboardBody,
+    #globalLeaderboardBody {
+      font-size: 0.8rem;
+      color: var(--text-dim);
+      text-align: left;
+    }
+
+    #leaderboardBody ol,
+    #globalLeaderboardBody ol {
+      padding-left: 18px;
+      margin: 4px 0;
+    }
+
     @media (max-width: 720px) {
       .flex-row {
         flex-direction: column;
@@ -300,6 +313,10 @@
       Token Multiplier: <span class="value" id="prestigeMult">1.00×</span><br>
       Best Time to Become One With the Mung: <span class="value" id="bestTime">–</span>
     </div>
+
+    <button id="ascendButton" title="Ascend after at least 10 rare mung beans to gain prestige and shards. Resets the cycle." disabled>
+      Ascend with Corrupted Mung
+    </button>
   </div>
 
   <div class="panel">
@@ -356,6 +373,24 @@
   </div>
 
   <div class="panel">
+    <h2>Prestige Lab Upgrades (Mung Shards)</h2>
+    <p class="prestige-info">
+      Mung Shards: <span class="value" id="mungShards">0</span>
+    </p>
+    <div class="flex-row">
+      <button id="buyShardToken" title="Permanent global token yield boost. Stacks with prestige.">
+        Mung Futures Trading (50 Shards)
+      </button>
+      <button id="buyShardFert" title="Permanent +5% rare mung bean chance.">
+        Quantum Soil Resonance (50 Shards)
+      </button>
+      <button id="buyShardGrowth" title="Permanent doubling of base sprout growth per tick.">
+        Temporal Harvest Loop (40 Shards)
+      </button>
+    </div>
+  </div>
+
+  <div class="panel">
     <h2>Minigame</h2>
     <button id="toggleHarvestMode" title="Enter focused harvest mode. Click the glowing core to rip sprouts faster.">
       Toggle Harvest Mode
@@ -370,13 +405,63 @@
     <div id="log"></div>
   </div>
 
+  <div class="panel">
+    <h2>Local Leaderboard</h2>
+    <div id="leaderboardBody">No ascensions yet. The leaderboard sleeps.</div>
+  </div>
+
+  <div class="panel">
+    <h2>Global Leaderboard (Online)</h2>
+    <div id="globalLeaderboardBody">Loading global leaderboard...</div>
+  </div>
+
   <div id="winScreen">
     <p>You have become one with the Mung!</p>
     <p>Time spent this run: <span id="finalTime"></span> seconds.</p>
     <p>Prestige Level: <span id="finalPrestige"></span></p>
-    <button id="prestigeButton">Ascend with Corrupted Mung (Prestige Reset)</button>
+    <p>You gained <span id="finalGainedPrestige"></span> prestige and <span id="finalShards"></span> Mung Shards.</p>
+    <button id="prestigeButton">Begin Next Cycle</button>
   </div>
 
+  <!-- Firebase + Firestore (module) -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/12.6.0/firebase-app.js";
+    import {
+      getFirestore,
+      collection,
+      addDoc,
+      getDocs,
+      query,
+      orderBy,
+      limit
+    } from "https://www.gstatic.com/firebasejs/12.6.0/firebase-firestore.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyC3yJ7v9fGX715rDUpEL3euUKfmOpDkf_o",
+      authDomain: "mungbean-game.firebaseapp.com",
+      projectId: "mungbean-game",
+      storageBucket: "mungbean-game.firebasestorage.app",
+      messagingSenderId: "326905706138",
+      appId: "1:326905706138:web:4b3da5b0fa4fe630429123",
+      measurementId: "G-FLP3F73TFY"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+
+    // Make Firestore available to the main script
+    window.mungFirebase = {
+      db,
+      collection,
+      addDoc,
+      getDocs,
+      query,
+      orderBy,
+      limit
+    };
+  </script>
+
+  <!-- Main game logic -->
   <script>
     // --- Game State ---
     let sprouts = 0;
@@ -401,8 +486,17 @@
     // Prestige
     let prestigeLevel = 0;
     let bestTime = null; // seconds
+    let mungShards = 0;
+
+    // Prestige-only upgrades
+    let hasShardTokenUpgrade = false;
+    let hasShardFertUpgrade = false;
+    let hasShardGrowthUpgrade = false;
 
     let timePlayed = 0;
+
+    // Leaderboards
+    let leaderboard = [];
 
     // Interval handles
     let growthInterval = null;
@@ -422,14 +516,16 @@
     const MAX_VISIBLE_SPROUTS = 60;
     const MILK_VAT_MS = 1000;
     const PRESTIGE_TOKEN_STEP = 0.25; // each prestige adds +25% token multiplier
-    const PRESTIGE_FERT_STEP = 0.02; // each prestige adds +2% absolute rare chance, clamped
+    const PRESTIGE_FERT_STEP = 0.02; // each prestige adds +2% absolute rare chance
+    const MIN_RARE_FOR_ASCEND = 10;
 
     // Dynamic modifiers
-    let growthAmount = 1;                  // sprouts per growth tick
     let autoHarvestExtra = 0;              // extra harvests per harvester tick
     let autoJuiceExtra = 0;                // extra juicings per juicer tick
-    let tokenPerJuiceBase = 1;             // base: 1, corp syndicate doubles
-    let fertilizerChanceBase = BASE_FERTILIZER_CHANCE; // base chance before prestige
+    let tokenPerJuiceBase = 1;             // base: 1, corp syndicate doubles to 2
+    let fertilizerChanceBase = BASE_FERTILIZER_CHANCE; // 5% or 10% with Neuro-Fert
+
+    let hasShownAscendHint = false;
 
     // --- DOM references ---
     const sproutsSpan = document.getElementById('sprouts');
@@ -441,6 +537,8 @@
     const prestigeLevelSpan = document.getElementById('prestigeLevel');
     const prestigeMultSpan = document.getElementById('prestigeMult');
     const bestTimeSpan = document.getElementById('bestTime');
+    const mungShardsSpan = document.getElementById('mungShards');
+    const ascendButton = document.getElementById('ascendButton');
 
     const fieldDiv = document.getElementById('field');
     const juiceLevelDiv = document.getElementById('juice-level');
@@ -461,15 +559,24 @@
     const buyNeuroFertBtn = document.getElementById('buyNeuroFert');
     const buyMilkVatBtn = document.getElementById('buyMilkVat');
 
+    const buyShardTokenBtn = document.getElementById('buyShardToken');
+    const buyShardFertBtn = document.getElementById('buyShardFert');
+    const buyShardGrowthBtn = document.getElementById('buyShardGrowth');
+
     const toggleHarvestModeBtn = document.getElementById('toggleHarvestMode');
     const harvestModeDiv = document.getElementById('harvest-mode');
     const targetDiv = document.getElementById('target');
 
     const logDiv = document.getElementById('log');
 
+    const leaderboardBody = document.getElementById('leaderboardBody');
+    const globalLeaderboardBody = document.getElementById('globalLeaderboardBody');
+
     const winScreen = document.getElementById('winScreen');
     const finalTimeSpan = document.getElementById('finalTime');
     const finalPrestigeSpan = document.getElementById('finalPrestige');
+    const finalGainedPrestigeSpan = document.getElementById('finalGainedPrestige');
+    const finalShardsSpan = document.getElementById('finalShards');
     const prestigeButton = document.getElementById('prestigeButton');
 
     // --- Utility: Logging ---
@@ -485,7 +592,6 @@
       entry.appendChild(timeSpan);
       entry.appendChild(textSpan);
       logDiv.prepend(entry);
-      // Optional: limit log length
       const maxEntries = 80;
       while (logDiv.children.length > maxEntries) {
         logDiv.removeChild(logDiv.lastChild);
@@ -494,7 +600,9 @@
 
     // --- Prestige helpers ---
     function getTokenMultiplierFromPrestige() {
-      return 1 + prestigeLevel * PRESTIGE_TOKEN_STEP;
+      let mult = 1 + prestigeLevel * PRESTIGE_TOKEN_STEP;
+      if (hasShardTokenUpgrade) mult += 0.5;
+      return mult;
     }
 
     function getEffectiveTokenPerJuice() {
@@ -502,22 +610,151 @@
     }
 
     function getEffectiveFertilizerChance() {
-      // Base (5% or 10% with Neuro-Fert) + prestige bonus, capped at 70%
-      const base = fertilizerChanceBase;
-      const bonus = prestigeLevel * PRESTIGE_FERT_STEP;
+      let base = fertilizerChanceBase;
+      let bonus = prestigeLevel * PRESTIGE_FERT_STEP;
+      if (hasShardFertUpgrade) base += 0.05;
       return Math.min(0.7, base + bonus);
+    }
+
+    function getGrowthAmount() {
+      let base = 1;
+      if (hasShardGrowthUpgrade) base *= 2;   // prestige lab boost
+      if (hasNeonLamps) base *= 2;           // neon lamps
+      return base;
     }
 
     function updatePrestigeUI() {
       prestigeLevelSpan.textContent = prestigeLevel;
       prestigeMultSpan.textContent = getTokenMultiplierFromPrestige().toFixed(2) + '×';
       bestTimeSpan.textContent = bestTime === null ? '–' : bestTime + 's';
+      mungShardsSpan.textContent = mungShards;
+    }
+
+    function canAscend() {
+      return rareBeans >= MIN_RARE_FOR_ASCEND;
+    }
+
+    // --- Local Leaderboard helpers ---
+    function loadLeaderboard() {
+      const data = localStorage.getItem('mungLeaderboard');
+      if (data) {
+        try {
+          const parsed = JSON.parse(data);
+          if (Array.isArray(parsed)) leaderboard = parsed;
+        } catch (e) {
+          leaderboard = [];
+        }
+      }
+      renderLeaderboard();
+    }
+
+    function saveLeaderboard() {
+      localStorage.setItem('mungLeaderboard', JSON.stringify(leaderboard));
+    }
+
+    function addLeaderboardEntry(time, rare, gainedPrestige, totalPrestige, shards) {
+      const entry = {
+        time,
+        rare,
+        gainedPrestige,
+        totalPrestige,
+        shards,
+        date: new Date().toLocaleString()
+      };
+      leaderboard.push(entry);
+      leaderboard.sort((a, b) => a.time - b.time);
+      if (leaderboard.length > 5) leaderboard.length = 5;
+      saveLeaderboard();
+      renderLeaderboard();
+    }
+
+    function renderLeaderboard() {
+      leaderboardBody.innerHTML = '';
+      if (!leaderboard.length) {
+        leaderboardBody.textContent = 'No ascensions yet. The leaderboard sleeps.';
+        return;
+      }
+      const list = document.createElement('ol');
+      leaderboard.forEach(e => {
+        const li = document.createElement('li');
+        li.textContent =
+          `${e.time}s · ${e.rare} rare beans · +${e.gainedPrestige} prestige (${e.totalPrestige} total) · ` +
+          `${e.shards} shards · ${e.date}`;
+        list.appendChild(li);
+      });
+      leaderboardBody.appendChild(list);
+    }
+
+    // --- Online (global) leaderboard via Firestore ---
+    async function submitScoreToFirestore(runData) {
+      try {
+        if (!window.mungFirebase) {
+          console.warn("Firebase not initialized; skipping online submit.");
+          return;
+        }
+        const { db, collection, addDoc } = window.mungFirebase;
+        const scoresRef = collection(db, "scores");
+        await addDoc(scoresRef, runData);
+        console.log("Score submitted to Firestore:", runData);
+      } catch (err) {
+        console.error("Error submitting score to Firestore:", err);
+      }
+    }
+
+    async function loadGlobalLeaderboardFromFirestore() {
+      try {
+        if (!window.mungFirebase) {
+          console.warn("Firebase not initialized; skipping online leaderboard.");
+          globalLeaderboardBody.textContent = "Global leaderboard unavailable.";
+          return;
+        }
+        const { db, collection, getDocs, query, orderBy, limit } = window.mungFirebase;
+        const scoresRef = collection(db, "scores");
+
+        // Top 10 fastest ascensions by time
+        const q = query(scoresRef, orderBy("time", "asc"), limit(10));
+        const snapshot = await getDocs(q);
+
+        const entries = [];
+        snapshot.forEach(doc => {
+          entries.push(doc.data());
+        });
+
+        renderGlobalLeaderboard(entries);
+      } catch (err) {
+        console.error("Error loading Firestore leaderboard:", err);
+        globalLeaderboardBody.textContent = "Error loading global leaderboard.";
+      }
+    }
+
+    function renderGlobalLeaderboard(entries) {
+      globalLeaderboardBody.innerHTML = "";
+      if (!entries.length) {
+        globalLeaderboardBody.textContent = "No global ascensions yet.";
+        return;
+      }
+      const list = document.createElement("ol");
+      entries.forEach(e => {
+        const li = document.createElement("li");
+        const time = e.time ?? "?";
+        const rare = e.rare ?? "?";
+        const gainedPrestige = e.gainedPrestige ?? "?";
+        const totalPrestige = e.totalPrestige ?? "?";
+        const shards = e.shards ?? "?";
+        const player = e.playerName ?? "Anonymous Mung";
+
+        li.textContent =
+          `${time}s · ${rare} rare · +${gainedPrestige} prestige (${totalPrestige} total) · ` +
+          `${shards} shards · ${player}`;
+        list.appendChild(li);
+      });
+      globalLeaderboardBody.appendChild(list);
     }
 
     // --- Core Loops ---
     function startGameLoops() {
       growthInterval = setInterval(() => {
-        sprouts += growthAmount;
+        sprouts += getGrowthAmount();
         updateSproutsUI();
         updateUI();
       }, GROWTH_MS);
@@ -570,7 +807,6 @@
       tokensSpan.textContent = tokens;
       rareBeansSpan.textContent = rareBeans;
 
-      // Core action buttons
       harvestButton.disabled = sprouts === 0;
       juiceButton.disabled = harvested === 0;
       sellButton.disabled = juice === 0;
@@ -589,18 +825,24 @@
       buyNeuroFertBtn.disabled = hasNeuroFert || tokens < 300 || !hasFertilizer;
       buyMilkVatBtn.disabled = hasMilkVat || tokens < 600;
 
+      // Prestige lab upgrades
+      buyShardTokenBtn.disabled = hasShardTokenUpgrade || mungShards < 50;
+      buyShardFertBtn.disabled = hasShardFertUpgrade || mungShards < 50;
+      buyShardGrowthBtn.disabled = hasShardGrowthUpgrade || mungShards < 40;
+
+      // Ascend availability
+      ascendButton.disabled = !canAscend();
+
       updatePrestigeUI();
     }
 
     // --- Actions ---
     function manualHarvest() {
       if (sprouts <= 0) return;
-
       const baseAmount = hasLargerBeans ? 2 : 1;
       const actual = Math.min(baseAmount, sprouts);
       sprouts -= actual;
       harvested += actual;
-
       updateSproutsUI();
       updateUI();
     }
@@ -670,14 +912,14 @@
       tokens -= 100;
       hasFertilizer = true;
 
-      fertilizerChanceBase = BASE_FERTILIZER_CHANCE; // ensure base
+      fertilizerChanceBase = BASE_FERTILIZER_CHANCE;
       fertilizerInterval = setInterval(() => {
         const chance = getEffectiveFertilizerChance();
         if (Math.random() < chance) {
           rareBeans++;
           updateUI();
           logMessage('A rare mung bean emerges from the glowing soil.');
-          checkWinCondition();
+          checkWinHint();
         }
       }, FERTILIZER_MS);
 
@@ -686,12 +928,10 @@
     }
 
     // --- Cyberpunk Upgrades ---
-
     function buyNeonLamps() {
       if (hasNeonLamps || tokens < 300) return;
       tokens -= 300;
       hasNeonLamps = true;
-      growthAmount = 2; // double sprout growth per tick
       logMessage('Neon Grow Lamps installed. Night and day collapse into a single UV blur.');
       updateUI();
     }
@@ -700,7 +940,7 @@
       if (hasDroneSwarm || tokens < 400 || !hasHarvester) return;
       tokens -= 400;
       hasDroneSwarm = true;
-      autoHarvestExtra = 1; // harvester now harvests twice per tick
+      autoHarvestExtra = 1;
       logMessage('Drone Harvester Swarm launched. The sky fills with buzzing profit.');
       updateUI();
     }
@@ -709,7 +949,7 @@
       if (hasJuicerArray || tokens < 400 || !hasJuicer) return;
       tokens -= 400;
       hasJuicerArray = true;
-      autoJuiceExtra = 1; // juicer now juices twice per tick
+      autoJuiceExtra = 1;
       logMessage('Industrial Juicer Array online. The juice river never stops.');
       updateUI();
     }
@@ -718,7 +958,7 @@
       if (hasCorpSyndicate || tokens < 500) return;
       tokens -= 500;
       hasCorpSyndicate = true;
-      tokenPerJuiceBase = 2; // 2 tokens per juice before prestige multiplier
+      tokenPerJuiceBase = 2;
       logMessage('Signed with the Corporate Mung Syndicate. Every drop now pays in blood-money tokens.');
       updateUI();
     }
@@ -727,7 +967,7 @@
       if (hasNeuroFert || tokens < 300 || !hasFertilizer) return;
       tokens -= 300;
       hasNeuroFert = true;
-      fertilizerChanceBase = BASE_FERTILIZER_CHANCE * 2; // 10% per second before prestige bonus
+      fertilizerChanceBase = BASE_FERTILIZER_CHANCE * 2;
       logMessage('Neuro-Fertilizer Grid activated. Rare mung thoughts pulse through the roots.');
       updateUI();
     }
@@ -746,7 +986,7 @@
           updateJuiceUI();
           updateUI();
           logMessage(`Mung Milk Vat converted 10 juice into ${tokensGained} tokens and 1 rare mung bean.`);
-          checkWinCondition();
+          checkWinHint();
         }
       }, MILK_VAT_MS);
 
@@ -754,40 +994,94 @@
       updateUI();
     }
 
-    // --- Win Condition & Prestige ---
-    function checkWinCondition() {
-      if (rareBeans >= 10) {
-        endGame();
+    // --- Prestige Lab Upgrades ---
+    function buyShardTokenUpgrade() {
+      if (hasShardTokenUpgrade || mungShards < 50) return;
+      mungShards -= 50;
+      hasShardTokenUpgrade = true;
+      logMessage('Prestige Lab: Mung Futures Trading unlocked. Global token yield improved.');
+      updateUI();
+    }
+
+    function buyShardFertUpgrade() {
+      if (hasShardFertUpgrade || mungShards < 50) return;
+      mungShards -= 50;
+      hasShardFertUpgrade = true;
+      logMessage('Prestige Lab: Quantum Soil Resonance unlocked. Rare mung beans whisper more often.');
+      updateUI();
+    }
+
+    function buyShardGrowthUpgrade() {
+      if (hasShardGrowthUpgrade || mungShards < 40) return;
+      mungShards -= 40;
+      hasShardGrowthUpgrade = true;
+      logMessage('Prestige Lab: Temporal Harvest Loop unlocked. Time bends around the sprouts.');
+      updateUI();
+    }
+
+    // --- Ascension (Prestige) ---
+    function checkWinHint() {
+      if (!hasShownAscendHint && canAscend()) {
+        hasShownAscendHint = true;
+        logMessage('The Mung is ready. You may now Ascend when you choose.');
       }
     }
 
-    function endGame() {
+    function handleAscendClick() {
+      if (!canAscend()) return;
+
       clearAllIntervals();
 
-      // Disable normal buttons (prestige button remains)
       document.querySelectorAll('button').forEach(btn => {
         if (btn !== prestigeButton) btn.disabled = true;
       });
 
-      finalTimeSpan.textContent = timePlayed;
-      finalPrestigeSpan.textContent = prestigeLevel;
-      winScreen.style.display = 'flex';
+      const gainedPrestige = Math.max(1, Math.floor(rareBeans / MIN_RARE_FOR_ASCEND));
+      const shardsEarned = rareBeans;
 
-      // Track best time
+      prestigeLevel += gainedPrestige;
+      mungShards += shardsEarned;
+
       if (bestTime === null || timePlayed < bestTime) {
         bestTime = timePlayed;
       }
 
-      logMessage('You have become one with the Mung. Time fractures into legumes.');
+      // Local leaderboard
+      addLeaderboardEntry(timePlayed, rareBeans, gainedPrestige, prestigeLevel, shardsEarned);
+
+      // Ask player for a name once and cache it
+      let mungPlayerName = localStorage.getItem("mungPlayerName");
+      if (!mungPlayerName) {
+        mungPlayerName = prompt("Enter a name for the global leaderboard (optional):", "Anonymous Mung");
+        if (!mungPlayerName) mungPlayerName = "Anonymous Mung";
+        localStorage.setItem("mungPlayerName", mungPlayerName);
+      }
+
+      // Build data for Firestore
+      const runData = {
+        time: timePlayed,
+        rare: rareBeans,
+        gainedPrestige,
+        totalPrestige: prestigeLevel,
+        shards: shardsEarned,
+        playerName: mungPlayerName,
+        createdAt: new Date().toISOString()
+      };
+
+      // Submit to Firestore (global leaderboard)
+      submitScoreToFirestore(runData);
+
+      finalTimeSpan.textContent = timePlayed;
+      finalPrestigeSpan.textContent = prestigeLevel;
+      finalGainedPrestigeSpan.textContent = gainedPrestige;
+      finalShardsSpan.textContent = shardsEarned;
+      winScreen.style.display = 'flex';
+
+      logMessage(`Ascension prepared. You will gain +${gainedPrestige} prestige and ${shardsEarned} Mung Shards.`);
       updatePrestigeUI();
     }
 
-    function prestigeReset() {
-      // Increase prestige
-      prestigeLevel++;
-      logMessage(`Ascension complete. Corrupted Mung Resonance increased to level ${prestigeLevel}.`);
-
-      // Reset run state but keep prestige & bestTime
+    function resetRun() {
       sprouts = 0;
       harvested = 0;
       juice = 0;
@@ -807,26 +1101,24 @@
       hasNeuroFert = false;
       hasMilkVat = false;
 
-      growthAmount = 1;
       autoHarvestExtra = 0;
       autoJuiceExtra = 0;
       tokenPerJuiceBase = 1;
       fertilizerChanceBase = BASE_FERTILIZER_CHANCE;
 
-      // Close win screen
+      hasShownAscendHint = false;
+
       winScreen.style.display = 'none';
 
-      // Re-enable all buttons (UI will re-disable unaffordable upgrades)
       document.querySelectorAll('button').forEach(btn => btn.disabled = false);
 
-      // Reset UI
       updateSproutsUI();
       updateJuiceUI();
       updateUI();
       timePlayedSpan.textContent = timePlayed;
 
-      // Restart loops
       startGameLoops();
+      logMessage('A new cycle begins. The Mung remembers your previous corruption.');
     }
 
     // --- Harvest Mode Minigame ---
@@ -870,14 +1162,21 @@
       buyNeuroFertBtn.addEventListener('click', buyNeuroFert);
       buyMilkVatBtn.addEventListener('click', buyMilkVat);
 
+      buyShardTokenBtn.addEventListener('click', buyShardTokenUpgrade);
+      buyShardFertBtn.addEventListener('click', buyShardFertUpgrade);
+      buyShardGrowthBtn.addEventListener('click', buyShardGrowthUpgrade);
+
       toggleHarvestModeBtn.addEventListener('click', toggleHarvestMode);
       targetDiv.addEventListener('click', minigameHarvest);
 
-      prestigeButton.addEventListener('click', prestigeReset);
+      ascendButton.addEventListener('click', handleAscendClick);
+      prestigeButton.addEventListener('click', resetRun);
     }
 
     // --- Init ---
     function init() {
+      loadLeaderboard();                   // local
+      loadGlobalLeaderboardFromFirestore(); // global
       wireEvents();
       updateSproutsUI();
       updateJuiceUI();
@@ -886,7 +1185,8 @@
       logMessage('You awaken in the Neon Fields of Mung. The harvest awaits.');
     }
 
-    init();
+    // Run init after page fully loads (helps ensure Firebase module ran)
+    window.addEventListener('load', init);
   </script>
 </body>
 </html>
